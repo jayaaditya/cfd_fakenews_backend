@@ -11,12 +11,23 @@ import requests
 import json
 import numpy as np 
 import pickle
+from cfd_fakenews.settings import AZURE_KEY
+import requests
 
-with open('main/model','r') as f:
-    clf = pickle.load(f)
+sentiment_url = 'https://westcentralus.api.cognitive.microsoft.com/text/analytics/v2.0/sentiment'
+key_phrases_url = 'https://westcentralus.api.cognitive.microsoft.com/text/analytics/v2.0/keyPhrases'
 
-with open('main/vectorizer', 'r') as f:
-    vectorizer = pickle.load(f)
+with open('model/bias_news.pickle','r') as f:
+    bias_clf = pickle.load(f)
+
+with open('model/bias_vectorizer.pickle', 'r') as f:
+    bias_vectorizer = pickle.load(f)
+    
+with open('model/fake_news.pickle','r') as f:
+    fake_clf = pickle.load(f)
+
+with open('model/fake_vectorizer.pickle', 'r') as f:
+    fake_vectorizer = pickle.load(f)
     
 # Create your views here.
 
@@ -37,6 +48,22 @@ class LinkView(APIView):
         print title, '\n'
         print content
         response['content'] = content
+        fake_vector = fake_vectorizer.transform([content])
+        fake_result = fake_clf.predict(fake_vector)[0]
+        bias_vector = bias_vectorizer.transform([title])
+        bias_result = bias_clf.predict(bias_vector)[0]
+        response['bias_result'] = bias_result
+        response['fake_result'] = fake_result
+        headers   = {"Ocp-Apim-Subscription-Key": AZURE_KEY}
+        post_dict = {'documents':[{'id':1,'text':content}]}
+        r = requests.post(sentiment_url, headers = headers, json=post_dict)
+        resp = r.json()
+        sentiment = resp['documents'][0]['score']
+        r = requests.post(key_phrases_url, headers = headers, json=post_dict)
+        resp = r.json()
+        key_phrases = resp['documents'][0]['keyPhrases']
+        response['key_phrases'] = key_phrases
+        response['sentiment'] = sentiment
         return Response(response)
 
 def linkFView(request):
@@ -52,6 +79,6 @@ def linkFView(request):
     for x in b.find_all('p'):
         content += x.text
     response['content'] = content
-    content_vector = vectorizer.transform([content])
-    ans = clf.predict(content_vector)
+    content_vector = fake_vectorizer.transform([content])
+    ans = fake_clf.predict(content_vector)
     return HttpResponse(title + '\n\n' + content + '\n' + str(ans[0]))
