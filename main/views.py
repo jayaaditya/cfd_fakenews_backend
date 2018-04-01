@@ -35,7 +35,10 @@ class LinkView(APIView):
 
     def get(self, request, format=None):
         url = request.GET['url']
-        r = requests.get(url)
+        try:
+            r = requests.get(url)
+        except:
+            return Response({'error':'Unable to parse'})
         b = bs(r.content, 'lxml')
         title = ''
         for x in b.find_all('h1'):
@@ -44,24 +47,36 @@ class LinkView(APIView):
         content = ''
         for x in b.find_all('p'):
             content += x.text
+        if content == '':
+            return Response({'error':'Unable to parse'})
         print url
         print title, '\n'
         print content
         response['content'] = content
         fake_vector = fake_vectorizer.transform([content])
         fake_result = fake_clf.predict(fake_vector)[0]
-        bias_vector = bias_vectorizer.transform([title])
+        bias_vector = bias_vectorizer.transform([content])
         bias_result = bias_clf.predict(bias_vector)[0]
         response['bias_result'] = bias_result
         response['fake_result'] = fake_result
         headers   = {"Ocp-Apim-Subscription-Key": AZURE_KEY}
-        post_dict = {'documents':[{'id':1,'text':content}]}
-        r = requests.post(sentiment_url, headers = headers, json=post_dict)
-        resp = r.json()
-        sentiment = resp['documents'][0]['score']
-        r = requests.post(key_phrases_url, headers = headers, json=post_dict)
-        resp = r.json()
-        key_phrases = resp['documents'][0]['keyPhrases']
+        if len(content) >= 5120:
+            crop = 5120
+        else:
+            crop = -1
+        post_dict = {'documents':[{'id':1,'text':content[0:crop]}]}
+        try:
+            r = requests.post(sentiment_url, headers = headers, json=post_dict)
+            resp = r.json()
+            sentiment = resp['documents'][0]['score']
+        except:
+            sentiment = "unavailable"
+        try:
+            r = requests.post(key_phrases_url, headers = headers, json=post_dict)
+            resp = r.json()
+            key_phrases = resp['documents'][0]['keyPhrases']
+        except:
+            key_phrases = 'unavailable'
         response['key_phrases'] = key_phrases
         response['sentiment'] = sentiment
         return Response(response)
