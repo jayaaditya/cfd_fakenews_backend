@@ -3,8 +3,11 @@ from __future__ import unicode_literals
 from sklearn.naive_bayes import MultinomialNB 
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, HashingVectorizer
 from django.http.response import HttpResponse
+import rest_framework.status as status
 from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.views import APIView
+from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from bs4 import BeautifulSoup as bs
 import requests
@@ -64,13 +67,14 @@ class LinkView(APIView):
             crop = 5120
         else:
             crop = -1
-        post_dict = {'documents':[{'id':1,'text':content[0:crop]}]}
+        post_dict = {'documents':[{'id':1,'text':title}]}
         try:
             r = requests.post(sentiment_url, headers = headers, json=post_dict)
             resp = r.json()
             sentiment = resp['documents'][0]['score']
         except:
             sentiment = "unavailable"
+        post_dict = {'documents':[{'id':1,'text':content[0:crop]}]}
         try:
             r = requests.post(key_phrases_url, headers = headers, json=post_dict)
             resp = r.json()
@@ -81,19 +85,42 @@ class LinkView(APIView):
         response['sentiment'] = sentiment
         return Response(response)
 
-def linkFView(request):
-    print request.GET
-    url = request.GET['url']
-    r = requests.get(url)
-    b = bs(r.content, 'lxml')
-    title = ''
-    for x in b.find_all('h1'):
-        title += x.text
-    response = {'title':title}
-    content = ''
-    for x in b.find_all('p'):
-        content += x.text
-    response['content'] = content
-    content_vector = fake_vectorizer.transform([content])
-    ans = fake_clf.predict(content_vector)
-    return HttpResponse(title + '\n\n' + content + '\n' + str(ans[0]))
+@api_view(['POST'])
+@csrf_exempt
+def updateView(request):
+    if request.method == 'POST':
+        print request.POST
+        try:
+            url = request.POST['link']
+            fake_result = request.POST['fake_result']
+            bias_result = request.POST['bias_result']
+        except:
+            print "1"
+            return Response({'error':'BAD REQUEST'}, status = status.HTTP_400_BAD_REQUEST)
+        try:
+            r = requests.get(url)
+        except:
+            print "2"
+            return Response({'error':'Unable to parse'}, status = status.HTTP_400_BAD_REQUEST)
+        b = bs(r.content, 'lxml')
+        title = ''
+        for x in b.find_all('h1'):
+            title += x.text
+        response = {'title':title}
+        content = ''
+        for x in b.find_all('p'):
+            content += x.text
+        if content == '':
+            print "3"
+            return Response({'error':'Unable to parse'}, status = status.HTTP_400_BAD_REQUEST)
+        print url
+        print title, '\n'
+        print content
+        response['content'] = content
+        fake_vector = fake_vectorizer.transform([content])
+        fake_clf.partial_fit(fake_vector, [json.loads(fake_result)])
+        bias_vector = bias_vectorizer.transform([content])
+        bias_clf.partial_fit(bias_vector, [json.loads(fake_result)])
+        return Response(request.POST, status = status.HTTP_202_ACCEPTED)
+    else:
+        return Response({'error':'Forbidden request'}, status = status.HTTP_403_FORBIDDEN)
